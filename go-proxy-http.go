@@ -9,11 +9,13 @@ import (
 	"net"
 	"net/url"
 	"strings"
+	"time"
 )
 
 var (
-	port int
-	max  int
+	port    int
+	max     int
+	timeout time.Duration
 )
 
 func Banner() {
@@ -28,8 +30,9 @@ __  _  __ |__|  | |__| ____ \   _  \
         go-proxy-http `)
 }
 func Init() {
-	flag.IntVar(&port, "port", 1024, "端口")
-	flag.IntVar(&max, "max", 1024, "报文大小")
+	flag.IntVar(&port, "p", 1024, "端口")
+	flag.IntVar(&max, "m", 1024, "报文大小")
+	flag.DurationVar(&timeout, "t", 10*time.Second, "响应延迟")
 }
 func main() {
 	Init()
@@ -47,7 +50,7 @@ func main() {
 		if err != nil {
 			continue
 		}
-		go handleConnection(client)
+		go handleConnection(proxyConn{c: client})
 	}
 }
 
@@ -58,9 +61,69 @@ func checkArgs() {
 	}
 }
 
-func handleConnection(client net.Conn) {
+type proxyConn struct {
+	c net.Conn
+}
+
+func (p proxyConn) Read(b []byte) (n int, err error) {
+	err = p.SetReadDeadline(time.Now().Add(timeout))
+	if err != nil {
+		return 0, err
+	}
+	return p.c.Read(b)
+}
+
+func (p proxyConn) Write(b []byte) (n int, err error) {
+	err = p.SetWriteDeadline(time.Now().Add(timeout))
+	if err != nil {
+		return 0, err
+	}
+	return p.c.Write(b)
+}
+
+func (p proxyConn) Close() error {
+	return p.c.Close()
+}
+
+func (p proxyConn) LocalAddr() net.Addr {
+	return p.c.LocalAddr()
+}
+
+func (p proxyConn) RemoteAddr() net.Addr {
+	return p.c.RemoteAddr()
+}
+
+func (p proxyConn) SetDeadline(t time.Time) error {
+	return p.c.SetDeadline(t)
+}
+
+func (p proxyConn) SetReadDeadline(t time.Time) error {
+	return p.c.SetReadDeadline(t)
+}
+
+func (p proxyConn) SetWriteDeadline(t time.Time) error {
+	return p.c.SetWriteDeadline(t)
+}
+
+type pNet interface {
+	Read(b []byte) (n int, err error)
+	Write(b []byte) (n int, err error)
+	Close() error
+	LocalAddr() net.Addr
+	RemoteAddr() net.Addr
+	SetDeadline(t time.Time) error
+	SetReadDeadline(t time.Time) error
+	SetWriteDeadline(t time.Time) error
+}
+
+func handleConnection(client proxyConn) {
 	var b = make([]byte, max)
-	_, err := client.Read(b[:])
+	err := client.SetDeadline(time.Now().Add(timeout))
+	if err != nil {
+		return
+	}
+	err = client.SetDeadline(time.Now().Add(timeout))
+	_, err = client.Read(b[:])
 
 	if err != nil {
 		return
@@ -92,7 +155,8 @@ func handleConnection(client net.Conn) {
 			serverAddress = urlParse.Host
 		}
 	}
-	server, err := net.Dial("tcp", serverAddress)
+	server1, err := net.Dial("tcp", serverAddress)
+	server := proxyConn{c: server1}
 	if err != nil {
 		return
 	}
@@ -102,7 +166,10 @@ func handleConnection(client net.Conn) {
 			return
 		}
 	} else {
-		server.Write(b[:])
+		_, err := server.Write(b[:])
+		if err != nil {
+			return
+		}
 	}
 	go io.Copy(server, client)
 	go io.Copy(client, server)
