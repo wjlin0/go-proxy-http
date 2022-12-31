@@ -45,9 +45,11 @@ func main() {
 	if err != nil {
 		log.Panic(err)
 	}
+	log.Printf("监听成功,代理路由: http://localhost:%v\n", port)
 	for {
 		client, err := con.Accept()
 		if err != nil {
+			log.Printf("error accept: http://localhost:%v\n", port)
 			continue
 		}
 		go handleConnection(proxyConn{c: client})
@@ -118,26 +120,23 @@ type pNet interface {
 
 func handleConnection(client proxyConn) {
 	var b = make([]byte, max)
-	err := client.SetDeadline(time.Now().Add(timeout))
-	if err != nil {
-		return
-	}
-	err = client.SetDeadline(time.Now().Add(timeout))
-	_, err = client.Read(b[:])
+
+	_, err := client.Read(b[:])
 
 	if err != nil {
+		log.Println("reading error:" + err.Error())
 		return
 	}
 	var method, proxyUrl, httpProtocolVersion, serverAddress string
 	//fmt.Println(string(b[:]))
 	n := bytes.IndexByte(b[:], '\n')
 	if n == -1 {
-		fmt.Println("error protocol,need only http https")
+		log.Println("error protocol,need only http/https")
 		return
 	}
 	_, err = fmt.Sscanf(string(b[:n]), "%v %v %v", &method, &proxyUrl, &httpProtocolVersion)
 	if err != nil {
-		fmt.Println(err)
+		log.Println("error Sscanf:" + err.Error())
 		return
 	}
 	urlParse, err := url.Parse(proxyUrl)
@@ -155,22 +154,26 @@ func handleConnection(client proxyConn) {
 			serverAddress = urlParse.Host
 		}
 	}
-	server1, err := net.Dial("tcp", serverAddress)
+	server1, err := net.DialTimeout("tcp", serverAddress, timeout)
 	server := proxyConn{c: server1}
 	if err != nil {
+		log.Println("Dial error:" + err.Error())
 		return
 	}
 	if method == "CONNECT" {
 		_, err := client.Write([]byte("HTTP/1.1 200 Connection established\r\n\r\n"))
 		if err != nil {
+			log.Println("Write error:" + err.Error())
 			return
 		}
 	} else {
 		_, err := server.Write(b[:])
 		if err != nil {
+			log.Println("Write error:" + err.Error())
 			return
 		}
 	}
+	//fun C(ser,cli)
 	go io.Copy(server, client)
 	go io.Copy(client, server)
 	fmt.Printf("%v -> %v -> %v\n", client.LocalAddr(), server.LocalAddr(), serverAddress)
