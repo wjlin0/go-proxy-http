@@ -66,7 +66,17 @@ func handleConnection(client net.Conn) {
 		return
 	}
 	var method, proxyUrl, httpProtocolVersion, serverAddress string
-	fmt.Sscanf(string(b[:bytes.IndexByte(b[:], '\n')]), "%v %v %v", &method, &proxyUrl, &httpProtocolVersion)
+	//fmt.Println(string(b[:]))
+	n := bytes.IndexByte(b[:], '\n')
+	if n == -1 {
+		fmt.Println("error protocol,need only http https")
+		return
+	}
+	_, err = fmt.Sscanf(string(b[:n]), "%v %v %v", &method, &proxyUrl, &httpProtocolVersion)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 	urlParse, err := url.Parse(proxyUrl)
 	if err != nil {
 		return
@@ -96,5 +106,5 @@ func handleConnection(client net.Conn) {
 	}
 	go io.Copy(server, client)
 	go io.Copy(client, server)
-	fmt.Printf("%v -> %v\n", client.RemoteAddr(), server.RemoteAddr())
+	fmt.Printf("%v -> %v -> %v\n", client.LocalAddr(), server.LocalAddr(), serverAddress)
 }
